@@ -46,12 +46,14 @@ def open_whatsapp(driver):
     driver.get("https://web.whatsapp.com/")
     print("Please scan the QR code if prompted.")
     try:
+        # Wait until the main WhatsApp UI is loaded
         WebDriverWait(driver, 60).until(
-            EC.presence_of_element_located((By.XPATH, "//div[@title='Search input textbox']"))
+            EC.presence_of_element_located((By.XPATH, "//div[@id='pane-side']"))
         )
-        print("Logged in successfully.")
-    except Exception:
+        print("Login successful.")
+    except Exception as e:
         print("Login timeout. Please try again.")
+
 
 # Navigate to the specified group
 def navigate_to_group(driver):
@@ -79,10 +81,14 @@ def scrape_media(driver):
     last_height = 0
 
     while True:
-        # Wait for elements to load dynamically
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_all_elements_located((By.XPATH, "//div[contains(@class, 'message-in')]//video"))
-        )
+        try:
+            # Wait for video elements to load dynamically
+            WebDriverWait(driver, 20).until(
+                EC.presence_of_all_elements_located((By.XPATH, "//div[contains(@class, 'message-in')]//video"))
+            )
+        except Exception as e:
+            print("Timeout waiting for video elements. Continuing...")
+            break
 
         # Locate video elements
         media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//video")
@@ -102,6 +108,7 @@ def scrape_media(driver):
             print("No more content to load.")
             break
         last_height = new_height
+
 
 
 # Save video media blobs

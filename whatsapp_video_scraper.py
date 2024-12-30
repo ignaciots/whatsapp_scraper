@@ -79,22 +79,31 @@ def navigate_to_group(driver):
 
 # Scroll and find media
 def scrape_media(driver):
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    retries = 5  # Max retries to load new content
+    retries = 100  # Max retries to load new content
+    last_known_height = driver.execute_script("return document.body.scrollHeight")
 
     while retries > 0:
         print("Scrolling to load older messages...")
-        driver.execute_script("window.scrollTo(0, 0);")
-        random_delay()
+
+        # Locate the chat window dynamically
         try:
-            # Wait until the scroll height changes (indicating new messages loaded)
-            WebDriverWait(driver, 20).until(
-                lambda d: driver.execute_script("return document.body.scrollHeight") != last_height
+            chat_window = WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.XPATH, "//div[contains(@data-tab, '8')]"))
             )
-            last_height = driver.execute_script("return document.body.scrollHeight")
+            chat_window.send_keys(Keys.PAGE_UP)
+        except TimeoutException:
+            print("Failed to locate chat window.")
+            return
+
+        try:
+            # Wait for new content to load by monitoring the change in scroll height
+            WebDriverWait(driver, 20).until(
+                lambda d: driver.execute_script("return document.body.scrollHeight") > last_known_height
+            )
+            last_known_height = driver.execute_script("return document.body.scrollHeight")
             retries = 5  # Reset retries if new content is loaded
         except TimeoutException:
-            print("No new content loaded within timeout. Retrying...")
+            print("No new content loaded. Retrying...")
             retries -= 1
 
         # Locate video elements
@@ -106,6 +115,8 @@ def scrape_media(driver):
                 save_media_blob(driver, src)
 
     print("Finished scrolling and scraping media.")
+
+
 
 # Save video media blobs
 def save_media_blob(driver, src):

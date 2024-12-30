@@ -6,9 +6,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 import requests
 
 # Constants
@@ -78,17 +79,23 @@ def navigate_to_group(driver):
 
 # Scroll and find media
 def scrape_media(driver):
-    last_height = 0
+    last_height = driver.execute_script("return document.body.scrollHeight")
+    retries = 5  # Max retries to load new content
 
-    while True:
+    while retries > 0:
+        print("Scrolling to load older messages...")
+        driver.execute_script("window.scrollTo(0, 0);")
+        random_delay()
         try:
-            # Wait for video elements to load dynamically
+            # Wait until the scroll height changes (indicating new messages loaded)
             WebDriverWait(driver, 20).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//div[contains(@class, 'message-in')]//video"))
+                lambda d: driver.execute_script("return document.body.scrollHeight") != last_height
             )
-        except Exception as e:
-            print("Timeout waiting for video elements. Continuing...")
-            break
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            retries = 5  # Reset retries if new content is loaded
+        except TimeoutException:
+            print("No new content loaded within timeout. Retrying...")
+            retries -= 1
 
         # Locate video elements
         media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//video")
@@ -98,18 +105,7 @@ def scrape_media(driver):
             if src and "blob:" not in src:
                 save_media_blob(driver, src)
 
-        # Scroll up to load more content
-        driver.execute_script("window.scrollTo(0, 0);")
-        random_delay()
-
-        # Check if new content loaded
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            print("No more content to load.")
-            break
-        last_height = new_height
-
-
+    print("Finished scrolling and scraping media.")
 
 # Save video media blobs
 def save_media_blob(driver, src):

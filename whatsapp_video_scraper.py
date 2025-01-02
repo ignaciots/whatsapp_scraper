@@ -77,46 +77,63 @@ def navigate_to_group(driver):
         print(f"Failed to navigate to group: {e}")
 
 def scrape_media(driver):
-    last_known_height = driver.execute_script("return document.body.scrollHeight")
-    print(f'Last known height before scroll: {last_known_height}')
     all_videos_downloaded = False
     downloaded_videos = set()  # Keep track of downloaded videos
-    while not all_videos_downloaded:
+    retries = 10  # Limit the number of scroll attempts to prevent infinite loops
+
+    last_known_scroll_height = driver.execute_script("return document.body.scrollHeight")
+
+    while not all_videos_downloaded and retries > 0:
         try:
             # Locate the chat window dynamically
             print("Attempting to locate chat window...")
             chat_window = WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located((By.XPATH, "//div[contains(@data-tab, '8')]"))
             )
-            print("Chat window located. Sending PAGE_UP key.")
+            print("Chat window located. Scrolling...")
+            
+            # Capture current scroll position
+            current_scroll_position = driver.execute_script("return arguments[0].scrollTop;", chat_window)
+            print(f"Current scroll position before scroll: {current_scroll_position}")
+            
+            # Scroll up
             chat_window.click()
             chat_window.send_keys(Keys.PAGE_UP)
-        
-        except TimeoutException:
-            print("Chat window not found")
-            return
- 
-        try:
-            # Wait for new content to load by monitoring the change in scroll height
+            
+            # Wait for scrollTop to decrease (scrolling action)
             WebDriverWait(driver, 20).until(
-                lambda d: driver.execute_script("return document.body.scrollHeight") > last_known_height
+                lambda d: driver.execute_script("return arguments[0].scrollTop;", chat_window) < current_scroll_position
             )
-            last_known_height = driver.execute_script("return document.body.scrollHeight")
-            print(f'Last known height after scroll: {last_known_height}')
-        except TimeoutException:
-            print("No new content loaded. Retrying...")
-    
-        media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//video")
-        print(f"Total message elements found: {len(media_elements)}")
-        for element in media_elements:
-            print(element.get_attribute("outerHTML"))
+            print(f"Current scroll position after scroll: {driver.execute_script('return arguments[0].scrollTop;', chat_window)}")
 
+            # Wait for new content to load (scrollHeight to increase)
+            WebDriverWait(driver, 20).until(
+                lambda d: driver.execute_script("return document.body.scrollHeight") > last_known_scroll_height
+            )
+            last_known_scroll_height = driver.execute_script("return document.body.scrollHeight")
+            print(f"Scroll height after loading new content: {last_known_scroll_height}")
+
+        except TimeoutException:
+            print("No new content loaded. Stopping scroll.")
+            all_videos_downloaded = True
+            continue
+
+        # Locate media elements
+        media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//img[contains(@src, 'blob:')]")
+        print(f"Total media elements found: {len(media_elements)}")
+
+        # Save media if not already downloaded
         for media in media_elements:
             src = media.get_attribute("src")
             if src and "blob:" not in src and src not in downloaded_videos:
                 save_media_blob(driver, src)
                 downloaded_videos.add(src)
+
+        retries -= 1
+
     print("Finished scrolling and scraping media.")
+
+
 
 # Save video media blobs
 def save_media_blob(driver, src):

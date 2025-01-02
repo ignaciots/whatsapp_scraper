@@ -76,45 +76,6 @@ def navigate_to_group(driver):
     except Exception as e:
         print(f"Failed to navigate to group: {e}")
 
-# Scroll and find media
-def scrape_media_retries(driver):
-    retries = 100  # Max retries to load new content
-    last_known_height = driver.execute_script("return document.body.scrollHeight")
-
-    while retries > 0:
-        print("Scrolling to load older messages...")
-
-        # Locate the chat window dynamically
-        try:
-            chat_window = WebDriverWait(driver, 30).until(
-                EC.presence_of_element_located((By.XPATH, "//div[contains(@data-tab, '8')]"))
-            )
-            chat_window.send_keys(Keys.PAGE_UP)
-        except TimeoutException:
-            print("Failed to locate chat window.")
-            return
-
-        try:
-            # Wait for new content to load by monitoring the change in scroll height
-            WebDriverWait(driver, 20).until(
-                lambda d: driver.execute_script("return document.body.scrollHeight") > last_known_height
-            )
-            last_known_height = driver.execute_script("return document.body.scrollHeight")
-            retries = 5  # Reset retries if new content is loaded
-        except TimeoutException:
-            print("No new content loaded. Retrying...")
-            retries -= 1
-
-        # Locate video elements
-        media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//video")
-        print(f"Found {len(media_elements)} video elements.")
-        for media in media_elements:
-            src = media.get_attribute("src")
-            if src and "blob:" not in src:
-                save_media_blob(driver, src)
-
-    print("Finished scrolling and scraping media.")
-
 def scrape_media(driver):
     last_known_height = driver.execute_script("return document.body.scrollHeight")
     print(f'Last known height before scroll: {last_known_height}')
@@ -138,21 +99,14 @@ def scrape_media(driver):
         try:
             # Wait for new content to load by monitoring the change in scroll height
             WebDriverWait(driver, 20).until(
-                lambda d: driver.execute_script("return document.body.scrollHeight") < last_known_height
+                lambda d: driver.execute_script("return document.body.scrollHeight") > last_known_height
             )
             last_known_height = driver.execute_script("return document.body.scrollHeight")
             print(f'Last known height after scroll: {last_known_height}')
         except TimeoutException:
             print("No new content loaded. Retrying...")
     
-
-        # For thumbnails (often videos are represented as images)
-        media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//img[contains(@src, 'blob:')]")
-        print(f'Media elements value: {media_elements}')
-        # For actual video tags wrapped in a parent container:
-        #media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//div[contains(@style, 'video')]")
-        # Locate video elements
-        #media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//video")
+        media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//video")
         print(f"Total message elements found: {len(media_elements)}")
         for element in media_elements:
             print(element.get_attribute("outerHTML"))
@@ -162,7 +116,6 @@ def scrape_media(driver):
             if src and "blob:" not in src and src not in downloaded_videos:
                 save_media_blob(driver, src)
                 downloaded_videos.add(src)
-        all_videos_downloaded = True
     print("Finished scrolling and scraping media.")
 
 # Save video media blobs

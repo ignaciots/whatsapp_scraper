@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
@@ -14,7 +14,7 @@ import requests
 
 # Constants
 SAVE_FOLDER = "WhatsAppMedia"
-GROUP_NAME = "familia!"  # Replace with your group name
+GROUP_NAME = "familia!"  
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
@@ -30,13 +30,11 @@ def random_delay():
 def init_driver():
     user_agent = random.choice(USER_AGENTS)
     chrome_options = Options()
-    #chrome_options.add_argument("--headless")
     chrome_options.add_argument("--disable-gpu")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument(f"--user-agent={user_agent}")
     chrome_options.add_argument("--window-size=1920,1080")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    # Add session persistence
     chrome_options.add_argument("--user-data-dir=./whatsapp_session")
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -47,7 +45,6 @@ def open_whatsapp(driver):
     driver.get("https://web.whatsapp.com/")
     print("Please scan the QR code if prompted.")
     try:
-        # Wait until the main WhatsApp UI is loaded
         WebDriverWait(driver, 60).until(
             EC.presence_of_element_located((By.XPATH, "//div[@id='pane-side']"))
         )
@@ -55,11 +52,9 @@ def open_whatsapp(driver):
     except Exception as e:
         print("Login timeout. Please try again.")
 
-
 # Navigate to the specified group
 def navigate_to_group(driver):
     try:
-        # Wait for the search box to load
         WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, "//div[@contenteditable='true' and @data-tab='3']"))
         )
@@ -78,76 +73,79 @@ def navigate_to_group(driver):
 
 def scrape_media(driver):
     all_videos_downloaded = False
-    downloaded_videos = set()  # Keep track of downloaded videos
-    retries = 10  # Limit the number of scroll attempts to prevent infinite loops
-
-    last_known_scroll_height = driver.execute_script("return document.body.scrollHeight")
-
+    downloaded_videos = set()  
+    retries = 1 
     while not all_videos_downloaded and retries > 0:
         try:
-            # Locate the chat window dynamically
-            print("Attempting to locate chat window...")
-            chat_window = WebDriverWait(driver, 30).until(
+            print(f'retry number: {retries}')
+            chat_window = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.XPATH, "//div[contains(@data-tab, '8')]"))
             )
-            print("Chat window located. Scrolling...")
-            
-            # Capture current scroll position
-            current_scroll_position = driver.execute_script("return arguments[0].scrollTop;", chat_window)
-            print(f"Current scroll position before scroll: {current_scroll_position}")
-            
-            # Scroll up
-            chat_window.click()
-            chat_window.send_keys(Keys.PAGE_UP)
-            
-            # Wait for scrollTop to decrease (scrolling action)
-            WebDriverWait(driver, 20).until(
-                lambda d: driver.execute_script("return arguments[0].scrollTop;", chat_window) < current_scroll_position
-            )
-            print(f"Current scroll position after scroll: {driver.execute_script('return arguments[0].scrollTop;', chat_window)}")
+            print("Chat window located, scrolling")
 
-            # Wait for new content to load (scrollHeight to increase)
-            WebDriverWait(driver, 20).until(
-                lambda d: driver.execute_script("return document.body.scrollHeight") > last_known_scroll_height
-            )
-            last_known_scroll_height = driver.execute_script("return document.body.scrollHeight")
-            print(f"Scroll height after loading new content: {last_known_scroll_height}")
+            last_known_scroll_height = driver.execute_script("return arguments[0].scrollHeight;", chat_window)
+            while True:
+                print(f"Scroll height BEFORE scroll: {last_known_scroll_height}")
+                driver.execute_script("arguments[0].scrollIntoView(true);", chat_window)
+                time.sleep(5)  
+                new_height = driver.execute_script("return arguments[0].scrollHeight;", chat_window)
+                if new_height == last_known_scroll_height:
+                    button = WebDriverWait(driver, 5).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[.//div[text()='Click here to get older messages from your phone.']]"))
+                    )
+                    #button.click()
+                    #print("Button clicked successfully!")
+                    continue
+                last_known_scroll_height = new_height
+                print(f"Scroll height AFTER scroll: {last_known_scroll_height}")
+
+            download_buttons = driver.find_elements(By.XPATH, "//div/button[span[svg[path[@d]]]]")
+            print(f'Number of video buttons: {len(download_buttons)}')
+            new_videos = False
+            for button in download_buttons:
+                try:
+                    # Click the download button (assuming it's the only nested SVG with path inside)
+                    driver.execute_script("arguments[0].click();", button)
+                    time.sleep(5)  # Wait for the video to become visible
+
+                    # Find the video element after clicking (look for img with src attribute directly under a div with role attribute)
+                    video_element = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.XPATH, "//div[@role='button']//img[@src]"))
+                    )
+                    src = video_element.get_attribute('src')
+                    if src and src.startswith('blob:') and src not in downloaded_videos:
+                        save_media_blob(src)
+                        downloaded_videos.add(src)
+                        new_videos = True
+                    if not new_videos:
+                        all_videos_downloaded = True
+                    else:
+                        retries = 1
+                except TimeoutException:
+                    print("Failed to locate video after click. Moving to next video.")
+                except Exception as e:
+                    print(f"An error occurred while downloading video: {e}")
 
         except TimeoutException:
-            print("No new content loaded. Stopping scroll.")
-            all_videos_downloaded = True
-            continue
-
-        # Locate media elements
-        media_elements = driver.find_elements(By.XPATH, "//div[contains(@class, 'message-in')]//img[contains(@src, 'blob:')]")
-        print(f"Total media elements found: {len(media_elements)}")
-
-        # Save media if not already downloaded
-        for media in media_elements:
-            src = media.get_attribute("src")
-            if src and "blob:" not in src and src not in downloaded_videos:
-                save_media_blob(driver, src)
-                downloaded_videos.add(src)
-
+            print("Timeout occurred while waiting for elements.")
+        except NoSuchElementException:
+            print("No more elements found.")
         retries -= 1
-
     print("Finished scrolling and scraping media.")
 
-
-
-# Save video media blobs
-def save_media_blob(driver, src):
+# Save video media
+def save_media_blob(src):
     file_name = f"{time.time_ns()}.mp4"
     file_path = os.path.join(SAVE_FOLDER, file_name)
 
     try:
-        response = requests.get(src)
+        response = requests.get(src, stream=True)
         with open(file_path, "wb") as file:
-            file.write(response.content)
+            for chunk in response.iter_content(chunk_size=8192):
+                file.write(chunk)
         print(f"Video saved: {file_path}")
     except Exception as e:
         print(f"Error saving video: {e}")
-
 
 # Main function
 def main():

@@ -12,7 +12,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 import requests
 
-SCROLL_RETRIES = 1
+
 SAVE_FOLDER = "WhatsAppMedia"
 GROUP_NAME = "familia!"  
 USER_AGENTS = [
@@ -80,6 +80,21 @@ def navigate_to_group(driver):
     except Exception as e:
         print(f"Failed to navigate to group: {e}")
 
+def handle_stale_element(driver, locator, timeout=10, retry_count=3):
+    for _ in range(retry_count):
+        try:
+            element = WebDriverWait(driver, timeout).until(
+                EC.presence_of_element_located(locator)
+            )
+            return element
+        except Exception as e:
+            if "stale element reference" in str(e).lower():
+                print("Stale element detected, retrying...")
+                time.sleep(1)  # Small delay before retrying
+            else:
+                raise e
+    return None  # If all retries fail
+
 
 def scrape_videos(driver):
     try:
@@ -124,36 +139,40 @@ def scrape_videos(driver):
                 print(f"An error occurred while clicking video download thumbnail: {e}")
 
         video_thumbnails = driver.find_elements(By.XPATH, "//div[contains(@style, 'background-image: url(\"data:image/jpeg;base64,')]")
+        
 
         for thumbnail in video_thumbnails:
-            try:
-                driver.execute_script("arguments[0].click();", thumbnail)
-                time.sleep(2)
+            thumbnail = handle_stale_element(driver, thumbnail)
+            if thumbnail:
+                try:
+                    
+                    driver.execute_script("arguments[0].click();", thumbnail)
+                    time.sleep(2)
 
-                # Look for the video element that might appear after clicking
-                video_element = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.TAG_NAME, "video"))
-                )
-                downloaded_videos = set() 
-                src = video_element.get_attribute('src')
-                if src and src.startswith('blob:') and src not in downloaded_videos:
-                    save_media_blob(driver, src)
-                    downloaded_videos.add(src)
+                    # Look for the video element that might appear after clicking
+                    video_element = WebDriverWait(driver, 10).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "video"))
+                    )
+                    downloaded_videos = set() 
+                    src = video_element.get_attribute('src')
+                    if src and src.startswith('blob:') and src not in downloaded_videos:
+                        save_media_blob(driver, src)
+                        downloaded_videos.add(src)
 
-                    print(f"Video URL found: {src}")
-                    # Implement your download logic with requests
+                        print(f"Video URL found: {src}")
+                        # Implement your download logic with requests
 
-            except TimeoutException:
-                print("No video element found after clicking thumbnail.")
-            except Exception as e:
-                print(f"An error occurred: {e}")
+                except TimeoutException:
+                    print("No video element found after clicking thumbnail.")
+                except Exception as e:
+                    print(f"An error occurred: {e}")
 
     except TimeoutException as e:
         print(f"Timeout occurred while waiting for elements: {e}")
 
 
 def scroll_chat(driver):
-    
+    SCROLL_RETRIES = 10
     while SCROLL_RETRIES > 0:
         try:
             print(f'retry number: {SCROLL_RETRIES}')
@@ -166,11 +185,11 @@ def scroll_chat(driver):
             while True:
                 print(f"Scroll height BEFORE scroll: {last_known_scroll_height}")
                 driver.execute_script("arguments[0].scrollIntoView(true);", chat_window)
-                time.sleep(5)  
+                time.sleep(5)
                 new_height = driver.execute_script("return arguments[0].scrollHeight;", chat_window)
                 if new_height == last_known_scroll_height:
                     button = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[.//div[text()='Click here to get older messages from your phone.']]"))
+                        EC.element_to_be_clickable((By.XPATH, "//button[.//div[contains(text(), 'older messages')]]"))
                     )
                     button.click()
                     print("Button clicked successfully!")
@@ -226,7 +245,7 @@ def main():
         scrape_videos(driver)
     finally:
         driver.quit()
-        print(f"All media was saved to: {SAVE_FOLDER}")
+        print(f"All video media found was saved to: {SAVE_FOLDER}")
 
 if __name__ == "__main__":
     main()
